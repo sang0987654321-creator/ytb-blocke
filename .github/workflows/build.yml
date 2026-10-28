@@ -15,7 +15,7 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Generate Project & Code V5
+      - name: Generate Project & Code V6 Liquid Glass
         run: |
           rm -rf app build.gradle settings.gradle gradle.properties
           mkdir -p app/src/main/java/com/example/ytbblocker
@@ -63,8 +63,8 @@ jobs:
                   applicationId = "com.example.ytbblocker"
                   minSdk = 21
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "5.0"
+                  versionCode = 6
+                  versionName = "6.0"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -81,17 +81,27 @@ jobs:
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
               android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged"
               android:accessibilityFeedbackType="feedbackGeneric"
-              android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
-              android:notificationTimeout="100"
+              android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
+              android:notificationTimeout="50"
               android:canRetrieveWindowContent="true" />
+          EOF
+
+          cat << 'EOF' > app/src/main/res/xml/device_admin.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-policies>
+                  <force-lock />
+              </uses-policies>
+          </device-admin>
           EOF
 
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
               <application
-                  android:label="Quản Lý YouTube"
+                  android:label="YouTube TimeGlass"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity
                       android:name=".MainActivity"
@@ -115,391 +125,104 @@ jobs:
                           android:name="android.accessibilityservice"
                           android:resource="@xml/service_config" />
                   </service>
+                  <receiver
+                      android:name=".AdminReceiver"
+                      android:permission="android.permission.BIND_DEVICE_ADMIN"
+                      android:exported="true">
+                      <meta-data
+                          android:name="android.app.device_admin"
+                          android:resource="@xml/device_admin" />
+                      <intent-filter>
+                          <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                      </intent-filter>
+                  </receiver>
               </application>
           </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/example/ytbblocker/AdminReceiver.kt
+          package com.example.ytbblocker
+          import android.app.admin.DeviceAdminReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class AdminReceiver : DeviceAdminReceiver() {
+              override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+                  return "Yêu cầu mật khẩu quản trị để gỡ cài đặt!"
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/example/ytbblocker/GlassUI.kt
+          package com.example.ytbblocker
+
+          import android.content.Context
+          import android.graphics.Color
+          import android.graphics.drawable.GradientDrawable
+          import android.util.TypedValue
+          import android.view.View
+
+          object GlassUI {
+              fun dp(context: Context, value: Int): Int {
+                  return TypedValue.applyDimension(
+                      TypedValue.COMPLEX_UNIT_DIP,
+                      value.toFloat(),
+                      context.resources.displayMetrics
+                  ).toInt()
+              }
+
+              // Thẻ kính mờ Liquid Glass chuẩn Apple visionOS
+              fun glassCard(context: Context, cornerDp: Int = 30): GradientDrawable {
+                  return GradientDrawable(
+                      GradientDrawable.Orientation.TL_BR,
+                      intArrayOf(
+                          Color.parseColor("#40FFFFFF"),
+                          Color.parseColor("#18FFFFFF"),
+                          Color.parseColor("#28FFFFFF")
+                      )
+                  ).apply {
+                      cornerRadius = dp(context, cornerDp).toFloat()
+                      setStroke(dp(context, 1), Color.parseColor("#66FFFFFF"))
+                  }
+              }
+
+              // Ô nhập liệu kính tối bên trong
+              fun glassInput(context: Context): GradientDrawable {
+                  return GradientDrawable().apply {
+                      setColor(Color.parseColor("#38000000"))
+                      cornerRadius = dp(context, 18).toFloat()
+                      setStroke(dp(context, 1), Color.parseColor("#45FFFFFF"))
+                  }
+              }
+
+              // Nút bấm Liquid Glass phát sáng
+              fun glassButton(context: Context, isAccent: Boolean = true, isDanger: Boolean = false): GradientDrawable {
+                  val colors = when {
+                      isDanger -> intArrayOf(Color.parseColor("#CCFF3B30"), Color.parseColor("#99D70015"))
+                      isAccent -> intArrayOf(Color.parseColor("#CC0A84FF"), Color.parseColor("#990055D4"))
+                      else -> intArrayOf(Color.parseColor("#35FFFFFF"), Color.parseColor("#18FFFFFF"))
+                  }
+                  return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, colors).apply {
+                      cornerRadius = dp(context, 20).toFloat()
+                      setStroke(dp(context, 1), Color.parseColor("#80FFFFFF"))
+                  }
+              }
+
+              // Nền vũ trụ sâu thẳm kiểu iOS 18
+              fun cosmicBackground(): GradientDrawable {
+                  return GradientDrawable(
+                      GradientDrawable.Orientation.TL_BR,
+                      intArrayOf(
+                          Color.parseColor("#0B0F29"),
+                          Color.parseColor("#1A103C"),
+                          Color.parseColor("#091E26")
+                      )
+                  )
+              }
+          }
           EOF
 
           cat << 'EOF' > app/src/main/java/com/example/ytbblocker/BlockerService.kt
           package com.example.ytbblocker
 
-          import android.accessibilityservice.AccessibilityService
-          import android.content.Context
-          import android.content.Intent
-          import android.os.Handler
-          import android.os.Looper
-          import android.view.accessibility.AccessibilityEvent
-          import java.text.SimpleDateFormat
-          import java.util.*
-
-          class BlockerService : AccessibilityService() {
-              private val handler = Handler(Looper.getMainLooper())
-              private var currentForegroundPkg = ""
-
-              private fun isTargetYoutube(pkg: String): Boolean {
-                  val p = pkg.lowercase(Locale.getDefault())
-                  if (p == this.packageName.lowercase(Locale.getDefault())) return false
-                  return p.contains("youtube") || 
-                         p.contains("smarttube") || 
-                         p.contains("vanced") || 
-                         p.contains("revanced") || 
-                         p.contains("newpipe") || 
-                         p.contains("tubular")
-              }
-
-              private fun isInstallerPkg(pkg: String): Boolean {
-                  val p = pkg.lowercase(Locale.getDefault())
-                  return p.contains("packageinstaller") || p.contains("permissioncontroller")
-              }
-
-              private fun checkIsYoutubeCurrentlyOnScreen(): Boolean {
-                  try {
-                      val activeRoot = rootInActiveWindow
-                      if (activeRoot != null && activeRoot.packageName != null) {
-                          if (isTargetYoutube(activeRoot.packageName.toString())) return true
-                      }
-                      for (window in windows) {
-                          val wPkg = window.root?.packageName?.toString() ?: continue
-                          if (isTargetYoutube(wPkg)) return true
-                      }
-                  } catch (e: Exception) {}
-                  return isTargetYoutube(currentForegroundPkg)
-              }
-
-              private val timerRunnable = object : Runnable {
-                  override fun run() {
-                      val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
-                      val today = SimpleDateFormat("ddMMyyyy", Locale.getDefault()).format(Date())
-                      val savedDate = prefs.getString("LAST_DATE", "")
-                      val defaultLimitSeconds = prefs.getInt("DAILY_LIMIT_MIN", 60) * 60
-
-                      var remainingSeconds = if (today != savedDate) {
-                          prefs.edit().putString("LAST_DATE", today).putInt("REMAINING_SEC", defaultLimitSeconds).apply()
-                          defaultLimitSeconds
-                      } else {
-                          prefs.getInt("REMAINING_SEC", defaultLimitSeconds)
-                      }
-
-                      if (checkIsYoutubeCurrentlyOnScreen()) {
-                          if (remainingSeconds <= 0) {
-                              triggerLock("YTB_LOCK")
-                          } else {
-                              remainingSeconds -= 1
-                              prefs.edit().putInt("REMAINING_SEC", remainingSeconds).apply()
-                          }
-                      }
-                      handler.postDelayed(this, 1000)
-                  }
-              }
-
-              override fun onServiceConnected() {
-                  super.onServiceConnected()
-                  handler.removeCallbacks(timerRunnable)
-                  handler.post(timerRunnable)
-              }
-
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                  if (event == null) return
-                  val pkg = event.packageName?.toString() ?: return
-
-                  if (pkg.contains("inputmethod") || pkg.contains("systemui") || pkg == this.packageName) {
-                      return
-                  }
-
-                  if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                      currentForegroundPkg = pkg
-                  }
-
-                  val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
-
-                  // Chặn bảng Gỡ cài đặt nếu chưa được cấp phép mở khóa
-                  val allowUninstallUntil = prefs.getLong("ALLOW_UNINSTALL_UNTIL", 0L)
-                  if (isInstallerPkg(pkg) && System.currentTimeMillis() > allowUninstallUntil) {
-                      triggerLock("UNINSTALL_LOCK")
-                      return
-                  }
-
-                  if (isTargetYoutube(pkg)) {
-                      val today = SimpleDateFormat("ddMMyyyy", Locale.getDefault()).format(Date())
-                      val savedDate = prefs.getString("LAST_DATE", "")
-                      val defaultLimitSeconds = prefs.getInt("DAILY_LIMIT_MIN", 60) * 60
-                      val remainingSeconds = if (today != savedDate) defaultLimitSeconds else prefs.getInt("REMAINING_SEC", defaultLimitSeconds)
-
-                      if (remainingSeconds <= 0) {
-                          triggerLock("YTB_LOCK")
-                      }
-                  }
-              }
-
-              private fun triggerLock(mode: String) {
-                  currentForegroundPkg = ""
-                  performGlobalAction(GLOBAL_ACTION_HOME)
-
-                  handler.postDelayed({
-                      val lockIntent = Intent(this, MainActivity::class.java).apply {
-                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                          putExtra("MODE", mode)
-                      }
-                      startActivity(lockIntent)
-                  }, 200)
-              }
-
-              override fun onInterrupt() {
-                  handler.removeCallbacks(timerRunnable)
-              }
-          }
-          EOF
-
-          cat << 'EOF' > app/src/main/java/com/example/ytbblocker/MainActivity.kt
-          package com.example.ytbblocker
-
-          import android.app.Activity
-          import android.content.Context
-          import android.content.Intent
-          import android.graphics.Color
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Bundle
-          import android.provider.Settings
-          import android.text.InputType
-          import android.view.Gravity
-          import android.view.View
-          import android.widget.*
-          import java.text.SimpleDateFormat
-          import java.util.*
-
-          class MainActivity : Activity() {
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  renderUI(intent)
-              }
-
-              override fun onNewIntent(intent: Intent?) {
-                  super.onNewIntent(intent)
-                  setIntent(intent)
-                  renderUI(intent)
-              }
-
-              override fun onResume() {
-                  super.onResume()
-                  renderUI(intent)
-              }
-
-              private fun isAccessibilityEnabled(): Boolean {
-                  val expected = "$packageName/${BlockerService::class.java.canonicalName}"
-                  val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-                  return enabledServices.contains(expected) || enabledServices.contains(packageName)
-              }
-
-              private fun renderUI(currentIntent: Intent?) {
-                  val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
-                  val mode = currentIntent?.getStringExtra("MODE") ?: "SETTINGS"
-
-                  val scroll = ScrollView(this).apply {
-                      setBackgroundColor(Color.parseColor("#101010"))
-                      isFillViewport = true
-                  }
-
-                  val layout = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      gravity = Gravity.CENTER
-                      setPadding(50, 40, 50, 40)
-                  }
-                  scroll.addView(layout)
-
-                  // MÀN HÌNH KHÓA KHI HẾT GIỜ YOUTUBE HOẶC CỐ TÌNH XÓA APP
-                  if (mode == "YTB_LOCK" || mode == "UNINSTALL_LOCK") {
-                      val lockTitle = TextView(this).apply {
-                          text = if (mode == "UNINSTALL_LOCK") "BẠN KHÔNG CÓ QUYỀN XÓA ỨNG DỤNG!" else "ĐÃ HẾT GIỜ XEM YOUTUBE!"
-                          textSize = 24f
-                          setTextColor(Color.parseColor("#FF5252"))
-                          gravity = Gravity.CENTER
-                      }
-
-                      val lockSub = TextView(this).apply {
-                          text = if (mode == "UNINSTALL_LOCK")
-                              "Nhập mã PIN quản trị (HHmmddMM) để cho phép gỡ cài đặt trong 2 phút:"
-                          else
-                              "Hôm nay đã hết thời gian xem.\nNhập mã PIN quản trị (HHmmddMM) nếu muốn cấp thêm giờ:"
-                          textSize = 16f
-                          setTextColor(Color.WHITE)
-                          gravity = Gravity.CENTER
-                          setPadding(0, 20, 0, 30)
-                      }
-
-                      val pinInput = EditText(this).apply {
-                          hint = "Nhập mã PIN quản trị"
-                          inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-                          textSize = 20f
-                          setTextColor(Color.WHITE)
-                          setHintTextColor(Color.GRAY)
-                          gravity = Gravity.CENTER
-                          width = 500
-                      }
-
-                      val extraMinInput = EditText(this).apply {
-                          hint = "Số phút cấp thêm (VD: 30)"
-                          inputType = InputType.TYPE_CLASS_NUMBER
-                          setText("30")
-                          textSize = 18f
-                          setTextColor(Color.YELLOW)
-                          gravity = Gravity.CENTER
-                          width = 500
-                          visibility = if (mode == "YTB_LOCK") View.VISIBLE else View.GONE
-                      }
-
-                      val btnUnlock = Button(this).apply {
-                          text = "XÁC NHẬN MỞ KHÓA"
-                          setOnClickListener {
-                              val secretPass = SimpleDateFormat("HHmmddMM", Locale.getDefault()).format(Date())
-                              if (pinInput.text.toString() == secretPass) {
-                                  if (mode == "YTB_LOCK") {
-                                      val addMins = extraMinInput.text.toString().toIntOrNull() ?: 30
-                                      prefs.edit().putInt("REMAINING_SEC", addMins * 60).apply()
-                                      Toast.makeText(this@MainActivity, "Đã cấp thêm $addMins phút!", Toast.LENGTH_LONG).show()
-                                  } else {
-                                      // Cho phép gỡ cài đặt trong vòng 2 phút tới
-                                      prefs.edit().putLong("ALLOW_UNINSTALL_UNTIL", System.currentTimeMillis() + 120000).apply()
-                                      Toast.makeText(this@MainActivity, "Đã mở khóa! Bạn có 2 phút để gỡ cài đặt app.", Toast.LENGTH_LONG).show()
-                                  }
-                                  intent?.removeExtra("MODE")
-                                  finish()
-                              } else {
-                                  Toast.makeText(this@MainActivity, "Sai mã PIN quản trị!", Toast.LENGTH_SHORT).show()
-                                  pinInput.text.clear()
-                              }
-                          }
-                      }
-
-                      val btnExit = Button(this).apply {
-                          text = "THOÁT RA MÀN HÌNH CHÍNH"
-                          setOnClickListener {
-                              intent?.removeExtra("MODE")
-                              val home = Intent(Intent.ACTION_MAIN).apply {
-                                  addCategory(Intent.CATEGORY_HOME)
-                                  flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                              }
-                              startActivity(home)
-                          }
-                      }
-
-                      layout.addView(lockTitle)
-                      layout.addView(lockSub)
-                      layout.addView(pinInput)
-                      layout.addView(extraMinInput)
-                      layout.addView(btnUnlock)
-                      layout.addView(btnExit)
-                      setContentView(scroll)
-                      pinInput.requestFocus()
-                      return
-                  }
-
-                  // MÀN HÌNH CÀI ĐẶT CHÍNH
-                  val remainSec = prefs.getInt("REMAINING_SEC", 3600)
-                  val dailyLimit = prefs.getInt("DAILY_LIMIT_MIN", 60)
-                  val serviceOn = isAccessibilityEnabled()
-
-                  val title = TextView(this).apply {
-                      text = "CÀI ĐẶT GIỚI HẠN YOUTUBE"
-                      textSize = 22f
-                      setTextColor(Color.parseColor("#4CAF50"))
-                      gravity = Gravity.CENTER
-                  }
-
-                  val statusService = TextView(this).apply {
-                      text = if (serviceOn) "✅ Trạng thái: ĐANG CHẠY NGẦM CANH GIỜ" else "❌ CHƯA BẬT QUYỀN HỖ TRỢ TIẾP CẬN (BƯỚC 1)!"
-                      textSize = 16f
-                      setTextColor(if (serviceOn) Color.GREEN else Color.RED)
-                      gravity = Gravity.CENTER
-                      setPadding(0, 15, 0, 10)
-                  }
-
-                  val statusTime = TextView(this).apply {
-                      text = "Giới hạn: $dailyLimit phút/ngày | Hôm nay còn: ${remainSec / 60} phút ${remainSec % 60} giây"
-                      textSize = 16f
-                      setTextColor(Color.WHITE)
-                      gravity = Gravity.CENTER
-                      setPadding(0, 5, 0, 20)
-                  }
-
-                  val timeInput = EditText(this).apply {
-                      hint = "Nhập số phút cho xem mỗi ngày"
-                      inputType = InputType.TYPE_CLASS_NUMBER
-                      setText(dailyLimit.toString())
-                      textSize = 18f
-                      setTextColor(Color.YELLOW)
-                      setHintTextColor(Color.GRAY)
-                      gravity = Gravity.CENTER
-                      width = 520
-                  }
-
-                  val pinInput = EditText(this).apply {
-                      hint = "Nhập mã PIN quản trị để lưu"
-                      inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-                      textSize = 18f
-                      setTextColor(Color.WHITE)
-                      setHintTextColor(Color.GRAY)
-                      gravity = Gravity.CENTER
-                      width = 520
-                  }
-
-                  val btnSave = Button(this).apply {
-                      text = "LƯU SỐ PHÚT XEM"
-                      setOnClickListener {
-                          val secretPass = SimpleDateFormat("HHmmddMM", Locale.getDefault()).format(Date())
-                          if (pinInput.text.toString() == secretPass) {
-                              val mins = timeInput.text.toString().toIntOrNull() ?: 60
-                              val today = SimpleDateFormat("ddMMyyyy", Locale.getDefault()).format(Date())
-                              prefs.edit()
-                                  .putString("LAST_DATE", today)
-                                  .putInt("DAILY_LIMIT_MIN", mins)
-                                  .putInt("REMAINING_SEC", mins * 60)
-                                  .apply()
-                              Toast.makeText(this@MainActivity, "Đã lưu! Cài đặt thành công $mins phút.", Toast.LENGTH_LONG).show()
-                              renderUI(intent)
-                          } else {
-                              Toast.makeText(this@MainActivity, "Sai mã PIN quản trị!", Toast.LENGTH_SHORT).show()
-                              pinInput.text.clear()
-                          }
-                      }
-                  }
-
-                  val btnAccess = Button(this).apply {
-                      text = "Bước 1: Bật Quyền Chặn Ngầm (Accessibility)"
-                      setOnClickListener {
-                          startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                      }
-                  }
-
-                  val btnOverlay = Button(this).apply {
-                      text = "Bước 2: Cấp Quyền Hiện Đè (Cho Android 10+)"
-                      setOnClickListener {
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                              val i = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                              startActivity(i)
-                          }
-                      }
-                  }
-
-                  layout.addView(title)
-                  layout.addView(statusService)
-                  layout.addView(statusTime)
-                  layout.addView(timeInput)
-                  layout.addView(pinInput)
-                  layout.addView(btnSave)
-                  layout.addView(btnAccess)
-                  layout.addView(btnOverlay)
-
-                  setContentView(scroll)
-              }
-          }
-          EOF
-
-      - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: YoutubeBlocker-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          import android.accessibilityservice.Accessibility
