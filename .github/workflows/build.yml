@@ -5,17 +5,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fix Windows BOM & Paths
+        run: |
+          # Nếu lỡ kéo cả thư mục YtbBlocker vào thì tự động đưa file ra ngoài
+          if [ -d "YtbBlocker" ]; then mv YtbBlocker/* . 2>/dev/null || true; fi
+          # Xóa ký tự ẩn BOM của Windows PowerShell trong tất cả các file
+          find . -type f -exec sed -i '1s/^\xEF\xBB\xBF//' {} +
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
+
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
