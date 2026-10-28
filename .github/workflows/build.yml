@@ -4,28 +4,377 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Fix Windows BOM & Paths
-        run: |
-          # Nếu lỡ kéo cả thư mục YtbBlocker vào thì tự động đưa file ra ngoài
-          if [ -d "YtbBlocker" ]; then mv YtbBlocker/* . 2>/dev/null || true; fi
-          # Xóa ký tự ẩn BOM của Windows PowerShell trong tất cả các file
-          find . -type f -exec sed -i '1s/^\xEF\xBB\xBF//' {} +
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
+
+      - name: Generate Project & Code Directly on Server
+        run: |
+          rm -rf app build.gradle settings.gradle gradle.properties
+          mkdir -p app/src/main/java/com/example/ytbblocker
+          mkdir -p app/src/main/res/xml
+
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "YtbBlocker"
+          include(":app")
+          EOF
+
+          cat << 'EOF' > build.gradle
+          plugins {
+              id("com.android.application") version "8.2.0" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.20" apply false
+          }
+          EOF
+
+          cat << 'EOF' > gradle.properties
+          android.useAndroidX=true
+          EOF
+
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.example.ytbblocker"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.ytbblocker"
+                  minSdk = 21
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/res/xml/service_config.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:notificationTimeout="100"
+              android:canRetrieveWindowContent="false" />
+          EOF
+
+          cat << 'EOF' > app/src/main/res/xml/device_admin.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-policies>
+                  <force-lock />
+              </uses-policies>
+          </device-admin>
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Khóa YouTube TV"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleInstance"
+                      android:excludeFromRecents="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".BlockerService"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/service_config" />
+                  </service>
+                  <receiver
+                      android:name=".AdminReceiver"
+                      android:permission="android.permission.BIND_DEVICE_ADMIN"
+                      android:exported="true">
+                      <meta-data
+                          android:name="android.app.device_admin"
+                          android:resource="@xml/device_admin" />
+                      <intent-filter>
+                          <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                      </intent-filter>
+                  </receiver>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/example/ytbblocker/AdminReceiver.kt
+          package com.example.ytbblocker
+          import android.app.admin.DeviceAdminReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.widget.Toast
+
+          class AdminReceiver : DeviceAdminReceiver() {
+              override fun onEnabled(context: Context, intent: Intent) {
+                  Toast.makeText(context, "Đã bật tính năng Chống Xóa App!", Toast.LENGTH_SHORT).show()
+              }
+              override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+                  return "CẢNH BÁO: Không được phép tắt quyền quản trị của ứng dụng này!"
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/example/ytbblocker/BlockerService.kt
+          package com.example.ytbblocker
+
+          import android.accessibilityservice.AccessibilityService
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.accessibility.AccessibilityEvent
+          import java.text.SimpleDateFormat
+          import java.util.*
+
+          class BlockerService : AccessibilityService() {
+              private val handler = Handler(Looper.getMainLooper())
+              private var isYoutubeOpen = false
+
+              private val youtubePackages = setOf(
+                  "com.google.android.youtube.tv",
+                  "com.google.android.youtube.tvkids",
+                  "com.google.android.youtube",
+                  "com.liskovsoft.smarttubetv.beta",
+                  "com.liskovsoft.smarttubetv",
+                  "com.smarttube.stable"
+              )
+
+              private val installerPackages = setOf(
+                  "com.android.packageinstaller",
+                  "com.google.android.packageinstaller"
+              )
+
+              private val timerRunnable = object : Runnable {
+                  override fun run() {
+                      if (isYoutubeOpen) {
+                          val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
+                          val today = SimpleDateFormat("ddMMyyyy", Locale.getDefault()).format(Date())
+                          val savedDate = prefs.getString("LAST_DATE", "")
+                          
+                          val defaultLimitSeconds = prefs.getInt("DAILY_LIMIT_MIN", 60) * 60
+                          var remainingSeconds = if (today != savedDate) {
+                              prefs.edit().putString("LAST_DATE", today).putInt("REMAINING_SEC", defaultLimitSeconds).apply()
+                              defaultLimitSeconds
+                          } else {
+                              prefs.getInt("REMAINING_SEC", defaultLimitSeconds)
+                          }
+
+                          if (remainingSeconds <= 0) {
+                              showLockScreen("YTB")
+                          } else {
+                              remainingSeconds -= 5
+                              prefs.edit().putInt("REMAINING_SEC", remainingSeconds).apply()
+                          }
+                      }
+                      handler.postDelayed(this, 5000)
+                  }
+              }
+
+              override fun onServiceConnected() {
+                  super.onServiceConnected()
+                  handler.post(timerRunnable)
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+                  if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                      val pkg = event.packageName?.toString() ?: return
+                      if (pkg == this.packageName || pkg.contains("inputmethod")) return
+
+                      val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
+
+                      val allowUninstallUntil = prefs.getLong("ALLOW_UNINSTALL_UNTIL", 0L)
+                      if (installerPackages.contains(pkg) && System.currentTimeMillis() > allowUninstallUntil) {
+                          showLockScreen("UNINSTALL")
+                          return
+                      }
+
+                      isYoutubeOpen = youtubePackages.contains(pkg)
+                      if (isYoutubeOpen && prefs.getInt("REMAINING_SEC", 3600) <= 0) {
+                          showLockScreen("YTB")
+                      }
+                  }
+              }
+
+              private fun showLockScreen(reason: String) {
+                  val lockIntent = Intent(this, MainActivity::class.java).apply {
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                      putExtra("REASON", reason)
+                  }
+                  startActivity(lockIntent)
+              }
+
+              override fun onInterrupt() {
+                  handler.removeCallbacks(timerRunnable)
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/example/ytbblocker/MainActivity.kt
+          package com.example.ytbblocker
+
+          import android.app.Activity
+          import android.app.admin.DevicePolicyManager
+          import android.content.ComponentName
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.Color
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.text.InputType
+          import android.view.Gravity
+          import android.widget.*
+          import java.text.SimpleDateFormat
+          import java.util.*
+
+          class MainActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
+                  val reason = intent.getStringExtra("REASON") ?: "SETUP"
+
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setPadding(50, 40, 50, 40)
+                      setBackgroundColor(Color.parseColor("#121212"))
+                  }
+
+                  val title = TextView(this).apply {
+                      text = if (reason == "UNINSTALL") "CHẶN GỠ CÀI ĐẶT ỨNG DỤNG!" else "QUẢN LÝ THỜI GIAN XEM YOUTUBE"
+                      textSize = 24f
+                      setTextColor(Color.parseColor("#FF5252"))
+                      gravity = Gravity.CENTER
+                  }
+
+                  val remainMin = prefs.getInt("REMAINING_SEC", 3600) / 60
+                  val info = TextView(this).apply {
+                      text = "Thời gian YouTube còn lại hôm nay: $remainMin phút\nNhập mật khẩu (HHmmddMM) để cài đặt giờ hoặc mở khóa:"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      gravity = Gravity.CENTER
+                      setPadding(0, 15, 0, 25)
+                  }
+
+                  val pinInput = EditText(this).apply {
+                      hint = "Nhập mật khẩu 8 số (HHmmddMM)"
+                      inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                      textSize = 20f
+                      setTextColor(Color.WHITE)
+                      setHintTextColor(Color.GRAY)
+                      gravity = Gravity.CENTER
+                      width = 550
+                  }
+
+                  val timeInput = EditText(this).apply {
+                      hint = "Số phút cho xem mỗi ngày (VD: 60)"
+                      inputType = InputType.TYPE_CLASS_NUMBER
+                      setText(prefs.getInt("DAILY_LIMIT_MIN", 60).toString())
+                      textSize = 18f
+                      setTextColor(Color.YELLOW)
+                      gravity = Gravity.CENTER
+                      width = 550
+                  }
+
+                  val btnSave = Button(this).apply {
+                      text = "MỞ KHÓA & CẬP NHẬT SỐ PHÚT XEM"
+                      setOnClickListener {
+                          val pass = SimpleDateFormat("HHmmddMM", Locale.getDefault()).format(Date())
+                          if (pinInput.text.toString() == pass) {
+                              val mins = timeInput.text.toString().toIntOrNull() ?: 60
+                              prefs.edit()
+                                  .putInt("DAILY_LIMIT_MIN", mins)
+                                  .putInt("REMAINING_SEC", mins * 60)
+                                  .putLong("ALLOW_UNINSTALL_UNTIL", System.currentTimeMillis() + 120000)
+                                  .apply()
+                              Toast.makeText(this@MainActivity, "Thành công! Đã cấp $mins phút xem YouTube.", Toast.LENGTH_LONG).show()
+                              finish()
+                          } else {
+                              Toast.makeText(this@MainActivity, "Sai mật khẩu! (Định dạng: GiờPhútNgàyTháng)", Toast.LENGTH_SHORT).show()
+                              pinInput.text.clear()
+                          }
+                      }
+                  }
+
+                  val btnAdmin = Button(this).apply {
+                      text = "Bước 1: Bật Chống Xóa App (Device Admin)"
+                      setOnClickListener {
+                          val comp = ComponentName(this@MainActivity, AdminReceiver::class.java)
+                          val i = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                              putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, comp)
+                              putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Bảo vệ ứng dụng không bị gỡ cài đặt.")
+                          }
+                          startActivity(i)
+                      }
+                  }
+
+                  val btnAccess = Button(this).apply {
+                      text = "Bước 2: Bật Quyền Canh Giờ (Accessibility)"
+                      setOnClickListener {
+                          startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                      }
+                  }
+
+                  layout.addView(title)
+                  layout.addView(info)
+                  layout.addView(pinInput)
+                  layout.addView(timeInput)
+                  layout.addView(btnSave)
+                  layout.addView(btnAdmin)
+                  layout.addView(btnAccess)
+
+                  setContentView(layout)
+                  pinInput.requestFocus()
+              }
+
+              override fun onBackPressed() {
+                  val home = Intent(Intent.ACTION_MAIN).apply {
+                      addCategory(Intent.CATEGORY_HOME)
+                      flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                  }
+                  startActivity(home)
+              }
+          }
+          EOF
 
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
