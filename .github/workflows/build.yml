@@ -16,7 +16,7 @@ jobs:
           gradle-version: '8.4'
           cache-disabled: true
 
-      - name: Generate Project & Code V11 Perfect Logic
+      - name: Generate Project & Code V12 v1.12 Stable
         run: |
           rm -rf app build.gradle settings.gradle gradle.properties
           mkdir -p app/src/main/java/com/example/ytbblocker
@@ -64,8 +64,8 @@ jobs:
                   applicationId = "com.example.ytbblocker"
                   minSdk = 21
                   targetSdk = 34
-                  versionCode = 11
-                  versionName = "11.0"
+                  versionCode = 12
+                  versionName = "v1.12"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -102,13 +102,13 @@ jobs:
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
               <application
-                  android:label="YouTube TimeGlass"
-                  android:theme="@android:style/Theme.Translucent.NoTitleBar">
+                  android:label="YouTube TimeGlass v1.12"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
                       android:launchMode="singleInstance"
-                      android:excludeFromRecents="true">
+                      android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -242,6 +242,17 @@ jobs:
                       override fun setColorFilter(colorFilter: ColorFilter?) {}
                       override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
                   }
+              }
+
+              fun cosmicBackground(): GradientDrawable {
+                  return GradientDrawable(
+                      GradientDrawable.Orientation.TL_BR,
+                      intArrayOf(
+                          Color.parseColor("#0B0F29"),
+                          Color.parseColor("#1A103C"),
+                          Color.parseColor("#091E26")
+                      )
+                  )
               }
 
               fun innerContentBox(context: Context): GradientDrawable {
@@ -382,7 +393,6 @@ jobs:
                   windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
               }
 
-              // MỖI KHI MỞ YOUTUBE: TỰ ĐỘNG TRỪ LÙI THỜI GIAN VÀ BẬT KÍNH KHOÁ NẾU HẾT GIỜ
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {
                   try {
                       if (isOverlayShowing) return
@@ -393,7 +403,6 @@ jobs:
                       val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
                       val allowAdminUntil = prefs.getLong("ALLOW_ADMIN_UNTIL", 0L)
 
-                      // 1. Chặn cố tình gỡ app hoặc tắt quyền
                       if (System.currentTimeMillis() > allowAdminUntil) {
                           if (isInstallerPkg(pkg) || isTamperingWithOurApp(rootInActiveWindow, pkg)) {
                               performGlobalAction(GLOBAL_ACTION_BACK)
@@ -402,7 +411,6 @@ jobs:
                           }
                       }
 
-                      // 2. Kiểm tra khi mở YouTube
                       if (isYoutubePkg(pkg)) {
                           var rem = getRemainingSeconds()
                           if (rem <= 0) {
@@ -410,7 +418,6 @@ jobs:
                               pauseYoutubeMedia()
                               showSolidAppleOverlay("YTB")
                           } else {
-                              // Trừ tự động 1 phút mỗi lần mở / chuyển màn hình YouTube
                               rem = (rem - 60).coerceAtLeast(0)
                               prefs.edit()
                                   .putInt("REMAINING_SEC", rem)
@@ -518,7 +525,7 @@ jobs:
                   }
                   centerBox.addView(passInput)
 
-                  // DÒNG 3: 2 nút "Tiếp tục xem" và "Không xem nữa"
+                  // DÒNG 3: Hai nút "Tiếp tục xem" và "Không xem nữa"
                   val btnRow = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER
@@ -581,7 +588,6 @@ jobs:
                           leftMargin = GlassUI.dp(context, 6)
                       }
                       setOnClickListener {
-                          // Bấm "Không xem nữa": Đá văng YouTube ra màn hình chính, lần sau vào lại VẪN BẮT NHẬP PASS
                           performGlobalAction(GLOBAL_ACTION_HOME)
                           handler.postDelayed({
                               removeGlassOverlay()
@@ -658,7 +664,6 @@ jobs:
           import android.provider.Settings
           import android.text.InputType
           import android.view.Gravity
-          import android.view.WindowManager
           import android.widget.*
           import java.text.SimpleDateFormat
           import java.util.*
@@ -667,16 +672,12 @@ jobs:
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                  window.attributes = window.attributes.apply {
-                      dimAmount = 0.45f
-                  }
-                  renderAppleAlertDashboard()
+                  renderMainDashboard()
               }
 
               override fun onResume() {
                   super.onResume()
-                  renderAppleAlertDashboard()
+                  renderMainDashboard()
               }
 
               private fun isAccessibilityEnabled(): Boolean {
@@ -696,17 +697,19 @@ jobs:
                   return dpm.isAdminActive(comp)
               }
 
-              private fun renderAppleAlertDashboard(showUninstallMode: Boolean = false) {
+              private fun renderMainDashboard(showUninstallMode: Boolean = false) {
                   val prefs = getSharedPreferences("YTB_PREFS", Context.MODE_PRIVATE)
                   val isLockedNow = prefs.getBoolean("IS_LOCKED_NOW", false) && prefs.getInt("REMAINING_SEC", 3600) <= 0
 
                   val scroll = ScrollView(this).apply {
-                      setBackgroundColor(Color.TRANSPARENT)
+                      background = GlassUI.cosmicBackground()
                       isFillViewport = true
                   }
 
-                  val container = FrameLayout(this).apply {
-                      val p = GlassUI.dp(context, 18)
+                  val container = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      val p = GlassUI.dp(context, 20)
                       setPadding(p, p, p, p)
                   }
                   scroll.addView(container)
@@ -717,10 +720,9 @@ jobs:
                       val padH = GlassUI.dp(context, 24)
                       val padV = GlassUI.dp(context, 26)
                       setPadding(padH, padV, padH, padV)
-                      layoutParams = FrameLayout.LayoutParams(
-                          GlassUI.dp(context, 365),
-                          FrameLayout.LayoutParams.WRAP_CONTENT,
-                          Gravity.CENTER
+                      layoutParams = LinearLayout.LayoutParams(
+                          GlassUI.dp(context, 380),
+                          LinearLayout.LayoutParams.WRAP_CONTENT
                       )
                   }
                   container.addView(card)
@@ -728,7 +730,7 @@ jobs:
                   if (showUninstallMode || isLockedNow) {
                       val header = TextView(this).apply {
                           text = if (showUninstallMode)
-                              "Yêu Cầu Xóa App\nYouTube TimeGlass"
+                              "Yêu Cầu Xóa App v1.12"
                           else
                               "Đã hết thời gian xem YouTube"
                           textSize = 20f
@@ -795,7 +797,7 @@ jobs:
                                   } else {
                                       val mins = prefs.getInt("DAILY_LIMIT_MIN", 60).let { if (it <= 0) 30 else it }
                                       prefs.edit().putBoolean("IS_LOCKED_NOW", false).putInt("REMAINING_SEC", mins * 60).apply()
-                                      renderAppleAlertDashboard(false)
+                                      renderMainDashboard(false)
                                   }
                               } else {
                                   Toast.makeText(this@MainActivity, "Sai mật khẩu!", Toast.LENGTH_SHORT).show()
@@ -815,7 +817,7 @@ jobs:
                               leftMargin = GlassUI.dp(context, 6)
                           }
                           setOnClickListener {
-                              if (showUninstallMode) renderAppleAlertDashboard(false) else finish()
+                              if (showUninstallMode) renderMainDashboard(false) else finish()
                           }
                       }
 
@@ -829,11 +831,11 @@ jobs:
                       return
                   }
 
-                  // BẢNG CÀI ĐẶT CHÍNH
+                  // BẢNG CÀI ĐẶT CHÍNH (Version v1.12 hiển thị rõ ràng)
                   val dailyMin = prefs.getInt("DAILY_LIMIT_MIN", 60)
 
                   val title = TextView(this).apply {
-                      text = "Giới Hạn Thời Gian\nYouTube TimeGlass"
+                      text = "YouTube TimeGlass (v1.12)"
                       textSize = 20f
                       setTypeface(Typeface.SANS_SERIF, Typeface.BOLD)
                       setTextColor(Color.parseColor("#111111"))
@@ -882,7 +884,7 @@ jobs:
 
                   fun makePermRow(label: String, isOk: Boolean, onClick: () -> Unit): TextView {
                       return TextView(this).apply {
-                        text = if (isOk) "●  $label: Đã bật" else "○  $label: Bấm để bật"
+                          text = if (isOk) "●  $label: Đã bật" else "○  $label: Bấm để bật"
                           textSize = 13f
                           setTypeface(Typeface.SANS_SERIF, Typeface.BOLD)
                           setTextColor(if (isOk) Color.parseColor("#248A3D") else Color.parseColor("#D70015"))
@@ -930,7 +932,7 @@ jobs:
                           rightMargin = GlassUI.dp(context, 8)
                       }
                       setOnClickListener {
-                          renderAppleAlertDashboard(showUninstallMode = true)
+                          renderMainDashboard(showUninstallMode = true)
                       }
                   }
 
@@ -960,6 +962,11 @@ jobs:
 
                   bottomRow.addView(btnDeleteApp)
                   bottomRow.addView(btnAllowSave)
+
+                  card.addView(title)
+                  card.addView(desc)
+                  card.addView(centerCard)
+                  card.addView(bottomRow)
 
                   setContentView(scroll)
               }
