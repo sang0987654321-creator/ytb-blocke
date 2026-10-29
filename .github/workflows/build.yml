@@ -16,7 +16,7 @@ jobs:
           gradle-version: '8.4'
           cache-disabled: true
 
-      - name: Generate Project & Code V10 Zero CPU Load
+      - name: Generate Project & Code V11 Perfect Logic
         run: |
           rm -rf app build.gradle settings.gradle gradle.properties
           mkdir -p app/src/main/java/com/example/ytbblocker
@@ -64,8 +64,8 @@ jobs:
                   applicationId = "com.example.ytbblocker"
                   minSdk = 21
                   targetSdk = 34
-                  versionCode = 10
-                  versionName = "10.0"
+                  versionCode = 11
+                  versionName = "11.0"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -83,7 +83,7 @@ jobs:
               android:accessibilityEventTypes="typeWindowStateChanged"
               android:accessibilityFeedbackType="feedbackGeneric"
               android:accessibilityFlags="flagRetrieveInteractiveWindows"
-              android:notificationTimeout="200"
+              android:notificationTimeout="100"
               android:canRetrieveWindowContent="true" />
           EOF
 
@@ -382,7 +382,7 @@ jobs:
                   windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
               }
 
-              // HOẠT ĐỘNG DỰA TRÊN SỰ KIỆN THỰC TẾ: KHÔNG CÒN VÒNG LẶP TIÊU TỤC CPU, MÁY MÁT LẠNH 100%
+              // MỖI KHI MỞ YOUTUBE: TỰ ĐỘNG TRỪ LÙI THỜI GIAN VÀ BẬT KÍNH KHOÁ NẾU HẾT GIỜ
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {
                   try {
                       if (isOverlayShowing) return
@@ -404,11 +404,23 @@ jobs:
 
                       // 2. Kiểm tra khi mở YouTube
                       if (isYoutubePkg(pkg)) {
-                          val rem = getRemainingSeconds()
+                          var rem = getRemainingSeconds()
                           if (rem <= 0) {
                               prefs.edit().putBoolean("IS_LOCKED_NOW", true).apply()
                               pauseYoutubeMedia()
                               showSolidAppleOverlay("YTB")
+                          } else {
+                              // Trừ tự động 1 phút mỗi lần mở / chuyển màn hình YouTube
+                              rem = (rem - 60).coerceAtLeast(0)
+                              prefs.edit()
+                                  .putInt("REMAINING_SEC", rem)
+                                  .putBoolean("IS_LOCKED_NOW", rem <= 0)
+                                  .apply()
+
+                              if (rem <= 0) {
+                                  pauseYoutubeMedia()
+                                  showSolidAppleOverlay("YTB")
+                              }
                           }
                       }
                   } catch (e: Exception) {}
@@ -455,17 +467,18 @@ jobs:
                       val padV = GlassUI.dp(context, 28)
                       setPadding(padH, padV, padH, padV)
                       layoutParams = FrameLayout.LayoutParams(
-                          GlassUI.dp(context, 360),
+                          GlassUI.dp(context, 370),
                           FrameLayout.LayoutParams.WRAP_CONTENT,
                           Gravity.CENTER
                       )
                   }
 
+                  // DÒNG 1: "Đã hết thời gian xem YouTube"
                   val title = TextView(this).apply {
                       text = if (mode == "PROTECT")
                           "Yêu Cầu Mật Khẩu Để Xóa App"
                       else
-                          "Đã hết thời gian xem YouTuBe"
+                          "Đã hết thời gian xem YouTube"
                       textSize = 20f
                       setTypeface(Typeface.SANS_SERIF, Typeface.BOLD)
                       setTextColor(Color.parseColor("#111111"))
@@ -473,6 +486,7 @@ jobs:
                       setPadding(0, 0, 0, GlassUI.dp(context, 18))
                   }
 
+                  // DÒNG 2: Ô để nhập mật khẩu
                   val centerBox = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       background = GlassUI.innerContentBox(context)
@@ -504,6 +518,7 @@ jobs:
                   }
                   centerBox.addView(passInput)
 
+                  // DÒNG 3: 2 nút "Tiếp tục xem" và "Không xem nữa"
                   val btnRow = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER
@@ -538,14 +553,14 @@ jobs:
                                       .putBoolean("IS_LOCKED_NOW", false)
                                       .apply()
                                   removeGlassOverlay()
-                                  Toast.makeText(this@BlockerService, "Đã mở khóa YouTube!", Toast.LENGTH_SHORT).show()
+                                  Toast.makeText(this@BlockerService, "Đã mở khóa! Mời bạn xem tiếp.", Toast.LENGTH_SHORT).show()
                               } else {
                                   prefs.edit().putLong("ALLOW_ADMIN_UNTIL", System.currentTimeMillis() + 180000).apply()
                                   removeGlassOverlay()
                                   triggerOneClickUninstall()
                               }
                           } else {
-                              Toast.makeText(this@BlockerService, "Mật khẩu không đúng!", Toast.LENGTH_SHORT).show()
+                              Toast.makeText(this@BlockerService, "Sai mật khẩu!", Toast.LENGTH_SHORT).show()
                               passInput.text.clear()
                           }
                       }
@@ -566,6 +581,7 @@ jobs:
                           leftMargin = GlassUI.dp(context, 6)
                       }
                       setOnClickListener {
+                          // Bấm "Không xem nữa": Đá văng YouTube ra màn hình chính, lần sau vào lại VẪN BẮT NHẬP PASS
                           performGlobalAction(GLOBAL_ACTION_HOME)
                           handler.postDelayed({
                               removeGlassOverlay()
@@ -714,7 +730,7 @@ jobs:
                           text = if (showUninstallMode)
                               "Yêu Cầu Xóa App\nYouTube TimeGlass"
                           else
-                              "Đã hết thời gian xem YouTuBe"
+                              "Đã hết thời gian xem YouTube"
                           textSize = 20f
                           setTypeface(Typeface.SANS_SERIF, Typeface.BOLD)
                           setTextColor(Color.parseColor("#111111"))
@@ -866,7 +882,7 @@ jobs:
 
                   fun makePermRow(label: String, isOk: Boolean, onClick: () -> Unit): TextView {
                       return TextView(this).apply {
-                          text = if (isOk) "●  $label: Đã bật" else "○  $label: Bấm để bật"
+                        text = if (isOk) "●  $label: Đã bật" else "○  $label: Bấm để bật"
                           textSize = 13f
                           setTypeface(Typeface.SANS_SERIF, Typeface.BOLD)
                           setTextColor(if (isOk) Color.parseColor("#248A3D") else Color.parseColor("#D70015"))
@@ -926,7 +942,7 @@ jobs:
                       setTextColor(Color.WHITE)
                       background = GlassUI.bluePillButton(context)
                       layoutParams = LinearLayout.LayoutParams(0, GlassUI.dp(context, 48), 1f).apply {
-                        leftMargin = GlassUI.dp(context, 8)
+                          leftMargin = GlassUI.dp(context, 8)
                       }
                       setOnClickListener {
                           val mins = minInput.text.toString().toIntOrNull() ?: 60
@@ -944,11 +960,6 @@ jobs:
 
                   bottomRow.addView(btnDeleteApp)
                   bottomRow.addView(btnAllowSave)
-
-                  card.addView(title)
-                  card.addView(desc)
-                  card.addView(centerCard)
-                  card.addView(bottomRow)
 
                   setContentView(scroll)
               }
